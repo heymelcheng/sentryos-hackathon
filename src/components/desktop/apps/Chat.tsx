@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import * as Sentry from '@sentry/nextjs'
 
 interface Message {
   id: string
@@ -67,6 +68,11 @@ export function Chat() {
     scrollToBottom()
   }, [messages, currentTool])
 
+  useEffect(() => {
+    Sentry.logger.info('Chat component initialized')
+    Sentry.metrics.count('chat.component_loaded', 1)
+  }, [])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim() || isLoading) return
@@ -77,6 +83,14 @@ export function Chat() {
       content: input.trim(),
       timestamp: new Date()
     }
+
+    Sentry.logger.info('User sent message', { messageLength: userMessage.content.length })
+    Sentry.metrics.count('chat.message_sent', 1, {
+      attributes: { role: 'user' }
+    })
+    Sentry.metrics.distribution('chat.user_message_length', userMessage.content.length, {
+      unit: 'none'
+    })
 
     setMessages(prev => [...prev, userMessage])
     setInput('')
@@ -145,6 +159,10 @@ export function Chat() {
                     : msg
                 ))
               } else if (parsed.type === 'tool_start') {
+                Sentry.logger.info('Tool started (client)', { toolName: parsed.tool })
+                Sentry.metrics.count('chat.tool_observed', 1, {
+                  attributes: { tool_name: parsed.tool }
+                })
                 setCurrentTool({
                   name: parsed.tool,
                   status: 'running'
@@ -155,11 +173,19 @@ export function Chat() {
                   elapsed: parsed.elapsed
                 } : null)
               } else if (parsed.type === 'done') {
+                Sentry.logger.info('Message completed successfully (client)')
+                Sentry.metrics.count('chat.message_completed', 1, {
+                  attributes: { status: 'success' }
+                })
                 setCurrentTool(null)
               } else if (parsed.type === 'error') {
+                Sentry.logger.error('Chat error received (client)', { error: parsed.message })
+                Sentry.metrics.count('chat.client_error', 1, {
+                  attributes: { error_type: 'api_error' }
+                })
                 streamingContent = 'Sorry, I encountered an error processing your request.'
-                setMessages(prev => prev.map(msg => 
-                  msg.id === streamingMessageId 
+                setMessages(prev => prev.map(msg =>
+                  msg.id === streamingMessageId
                     ? { ...msg, content: streamingContent }
                     : msg
                 ))
@@ -176,7 +202,13 @@ export function Chat() {
       if (!streamingContent) {
         setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId))
       }
-    } catch {
+    } catch (error) {
+      Sentry.logger.error('Chat request failed (client)', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      Sentry.metrics.count('chat.client_error', 1, {
+        attributes: { error_type: 'request_failed' }
+      })
       const errorMessage: Message = {
         id: crypto.randomUUID(),
         role: 'assistant',

@@ -10,6 +10,9 @@ Sentry.init({
   // Setting this option to true will print useful information to the console while you're setting up Sentry.
   debug: false,
 
+  // Enable structured logging
+  enableLogs: true,
+
   replaysOnErrorSampleRate: 1.0,
 
   // This sets the sample rate to be 10%. You may want this to be 100% while
@@ -23,5 +26,7 @@ Sentry.init({
       maskAllText: true,
       blockAllMedia: true,
     }),
+    // Capture console logs at warn and error levels
+    Sentry.consoleLoggingIntegration({ levels: ["warn", "error"] }),
   ],
 });
